@@ -124,7 +124,7 @@ const Login: React.FC = () => {
       
       // Mostrar mensaje de éxito
       toast({
-        title: "Inicio de sesión exitoso",
+        title: "Inicio de sesión realizado con éxito",
         description: "Has iniciado sesión correctamente.",
         variant: "default",
       });

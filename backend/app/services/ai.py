@@ -67,7 +67,7 @@ class AIProjectEstimator:
         total_hours_by_role["project_management"] = int(base_hours * 0.15)  # 15% del total
         total_hours_by_role["qa"] = int(base_hours * 0.2)  # 20% del total
         
-        # Calcular costos
+        # Calcular costes
         costs_by_role = {}
         for role, hours in total_hours_by_role.items():
             rate = self.hourly_rates.get(role, 50)  # Tarifa por defecto si no está definida

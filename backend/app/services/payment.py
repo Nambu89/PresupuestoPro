@@ -70,5 +70,5 @@ class PaymentService:
     
     @staticmethod
     def handle_payment_intent_succeeded(payment_intent: Dict[str, Any]) -> PaymentStatus:
-        # Procesar el pago exitoso
+        # Procesar el pago realizado con éxito
         return PaymentStatus.COMPLETED

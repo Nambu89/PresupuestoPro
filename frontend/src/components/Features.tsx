@@ -27,7 +27,7 @@ const Features = () => {
     {
       icon: <AlignLeft className="h-8 w-8 text-secondary-yellow" />,
       title: "Informe Detallado",
-      description: "Accede al desglose completo de tu presupuesto con análisis de costos y plazos.",
+      description: "Accede al desglose completo de tu presupuesto con análisis de costes y plazos.",
       free: false
     },
     {

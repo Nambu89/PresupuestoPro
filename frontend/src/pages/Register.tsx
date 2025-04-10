@@ -96,7 +96,7 @@ const Register = () => {
       await authApi.register(userData);
       
       toast({
-        title: "Registro exitoso",
+        title: "Registro realizado con éxito",
         description: "Tu cuenta ha sido creada correctamente. Ahora puedes iniciar sesión.",
         variant: "default",
       });

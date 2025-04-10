@@ -47,7 +47,7 @@ def create_user_project(
         if not project_in.estimated_duration_weeks:
             project_in.estimated_duration_weeks = preview_data.get("estimated_duration_weeks", 8)
         
-        print(f"Valores finales: costo={project_in.estimated_cost}, duración={project_in.estimated_duration_weeks}")
+        print(f"Valores finales: coste={project_in.estimated_cost}, duración={project_in.estimated_duration_weeks}")
         
         # Crear el proyecto
         project = create_project(
