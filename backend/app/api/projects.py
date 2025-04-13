@@ -1,10 +1,11 @@
 from typing import Any, List
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Response, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
-from app.crud.project import create_project, get_project, get_user_projects, update_project
+from app.crud.project import create_project, get_project, get_user_projects, update_project, delete_project
 from app.models.user import User
 from app.models.project import Project
 from app.schemas.project import Project as ProjectSchema, ProjectCreate, ProjectUpdate, ProjectPremium
@@ -33,32 +34,48 @@ def create_user_project(
         print(f"Creando proyecto para usuario ID: {current_user.id}")
         print(f"Datos del proyecto: {project_in.model_dump()}")
         
-        # Generar estimación con IA
-        description = project_in.description or project_in.name
-        print(f"Generando estimación para: {description[:100]}...")
+        # Preparar los datos completos del proyecto para la IA
+        project_data = {
+            "name": project_in.name,
+            "description": project_in.description,
+            "client": project_in.description.split('\n')[0] if project_in.description and '\n' in project_in.description else "",
+            "estimated_duration_weeks": project_in.estimated_duration_weeks
+        }
         
-        preview_data, full_data = ai_estimator.generate_estimate(description)
+        # Convertir a formato de texto para la IA
+        project_text = f"Nombre del proyecto: {project_data['name']}\n"
+        project_text += f"Cliente: {project_data['client']}\n"
+        project_text += f"Descripción: {project_data['description']}\n"
+        project_text += f"Duración estimada (semanas): {project_data['estimated_duration_weeks']}\n"
+        
+        print(f"Generando estimación para: {project_text[:200]}...")
+        
+        # Verificar que tenemos la clave de API configurada
+        api_key = os.getenv("AI_API_KEY")
+        api_url = os.getenv("AI_API_URL")
+        print(f"API Key configurada: {bool(api_key)}")
+        print(f"API URL configurada: {bool(api_url)}")
+        
+        # Generar estimación con IA
+        preview_data, full_data = ai_estimator.generate_estimate(project_text)
         print(f"Datos de vista previa generados: {preview_data}")
         
-        # Asegurarse de que los campos de estimación tengan valores predeterminados si no existen
-        if not project_in.estimated_cost:
-            project_in.estimated_cost = preview_data.get("estimated_cost", 10000)
-        
-        if not project_in.estimated_duration_weeks:
-            project_in.estimated_duration_weeks = preview_data.get("estimated_duration_weeks", 8)
+        # Asignar valores de la estimación al proyecto
+        project_in.estimated_cost = preview_data.get("estimated_cost", 10000)
+        project_in.estimated_duration_weeks = preview_data.get("estimated_duration_weeks", 8)
         
         print(f"Valores finales: coste={project_in.estimated_cost}, duración={project_in.estimated_duration_weeks}")
         
-        # Crear el proyecto
+        # Crear el proyecto con los datos generados por la IA
         project = create_project(
-            db=db, 
-            project=project_in, 
+            db=db,
+            project=project_in,
             user_id=current_user.id,
             preview_data=preview_data,
             full_data=full_data
         )
         
-        print(f"Proyecto creado con ID: {project.id}")
+        print(f"Proyecto creado con ID: {project.id}, coste: {project.estimated_cost}, duración: {project.estimated_duration_weeks}")
         return project
     except Exception as e:
         print(f"Error al crear proyecto: {str(e)}")
@@ -169,6 +186,36 @@ def update_user_project(
     project = update_project(db, project_id=project_id, project=project_in)
     return project
 
+@router.delete("/{project_id}")
+def delete_user_project(
+    *,
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    Delete a project
+    """
+    try:
+        # Verificar que el proyecto existe
+        project = get_project(db, project_id=project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Verificar que el usuario es el propietario del proyecto
+        if project.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not enough permissions")
+        
+        # Eliminar el proyecto
+        success = delete_project(db, project_id=project_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="Error deleting project")
+        
+        return {"message": "Project successfully deleted"}
+    except Exception as e:
+        print(f"Error al eliminar proyecto: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error deleting project: {str(e)}")
+
 @router.get("/{project_id}/view-pdf")
 def view_project_pdf(
     *,
@@ -218,8 +265,15 @@ def view_project_pdf(
         
         # Configurar la respuesta para visualización en el navegador
         filename = f"presupuesto_{project.name.replace(' ', '_')}.pdf"
-        response = Response(content=pdf_content, media_type="application/pdf")
-        response.headers["Content-Disposition"] = f"inline; filename={filename}"
+        response = Response(
+            content=pdf_content, 
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"inline; filename={filename}",
+                "Content-Type": "application/pdf",
+                "Access-Control-Expose-Headers": "Content-Disposition"
+            }
+        )
         
         print(f"PDF visualizado correctamente para: {project.name}")
         return response
@@ -276,8 +330,15 @@ def download_project_pdf(
         
         # Configurar la respuesta para descarga
         filename = f"presupuesto_{project.name.replace(' ', '_')}.pdf"
-        response = Response(content=pdf_content, media_type="application/pdf")
-        response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+        response = Response(
+            content=pdf_content, 
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Type": "application/pdf",
+                "Access-Control-Expose-Headers": "Content-Disposition"
+            }
+        )
         
         print(f"PDF descargado correctamente para: {project.name}")
         return response

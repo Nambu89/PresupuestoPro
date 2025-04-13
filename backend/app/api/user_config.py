@@ -1,6 +1,6 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
@@ -34,5 +34,17 @@ def update_config(
     """
     Actualizar la configuración del usuario actual
     """
-    config = update_user_config(db, user_id=current_user.id, config_in=config_in)
-    return config
+    try:
+        print(f"Actualizando configuración para usuario ID: {current_user.id}")
+        print(f"Datos recibidos: {config_in.model_dump()}")
+        
+        config = update_user_config(db, user_id=current_user.id, config_in=config_in)
+        
+        print(f"Configuración actualizada: {config.theme}, {config.language}, {config.currency}")
+        return config
+    except Exception as e:
+        print(f"Error al actualizar configuración: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating configuration: {str(e)}",
+        )

@@ -36,7 +36,6 @@ const NewProject = () => {
     description: "",
     features: "",
     deadline: "",
-    budget: "",
   });
 
   const handleChange = (e) => {
@@ -52,6 +51,20 @@ const NewProject = () => {
       ...formData,
       [name]: value,
     });
+  };
+  
+  // Función para convertir el tipo de proyecto a un nombre legible
+  const getProjectTypeName = (projectType: string): string => {
+    const projectTypes = {
+      "web": "Desarrollo Web",
+      "mobile": "Aplicación Móvil",
+      "ecommerce": "E-commerce",
+      "dashboard": "Dashboard",
+      "redesign": "Rediseño",
+      "other": "Otro"
+    };
+    
+    return projectTypes[projectType] || projectType;
   };
 
   const handleNext = () => {
@@ -89,11 +102,20 @@ const NewProject = () => {
     setIsGenerating(true);
     
     try {
+      // Preparar una descripción estructurada con todos los datos del formulario
+      let structuredDescription = `Cliente: ${formData.client}\n`;
+      structuredDescription += `Tipo de proyecto: ${getProjectTypeName(formData.projectType)}\n`;
+      structuredDescription += `Descripción: ${formData.description}\n`;
+      structuredDescription += `Funcionalidades: ${formData.features}\n`;
+      
+      if (formData.deadline) {
+        structuredDescription += `Fecha límite: ${formData.deadline}\n`;
+      }
+      
       // Crear el objeto de proyecto para enviar al backend
       const projectData = {
         name: formData.name,
-        description: `${formData.client}\n${formData.description}\n${formData.features}`,
-        estimated_cost: parseInt(formData.budget) || 10000, // Valor por defecto si no hay presupuesto
+        description: structuredDescription,
         estimated_duration_weeks: parseInt(formData.deadline) || 8 // Valor por defecto si no hay plazo
       };
       
@@ -113,7 +135,7 @@ const NewProject = () => {
       // Redirigir al dashboard después de un breve retraso
       setTimeout(() => {
         navigate("/dashboard");
-      }, 1000);
+      }, 1500);
     } catch (error) {
       console.error('Error al crear el proyecto:', error);
       
@@ -290,16 +312,6 @@ const NewProject = () => {
                         onChange={handleChange}
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="budget">Presupuesto estimado (opcional)</Label>
-                      <Input
-                        id="budget"
-                        name="budget"
-                        value={formData.budget}
-                        onChange={handleChange}
-                        placeholder="Ej: 10000"
-                      />
-                    </div>
                   </div>
                 </CardContent>
                 <CardFooter className="flex justify-between">
@@ -368,12 +380,7 @@ const NewProject = () => {
                             <p>{formData.deadline}</p>
                           </div>
                         )}
-                        {formData.budget && (
-                          <div>
-                            <p className="text-sm text-gray-500">Presupuesto estimado</p>
-                            <p>{formData.budget} €</p>
-                          </div>
-                        )}
+
                       </div>
                     </div>
                   </div>

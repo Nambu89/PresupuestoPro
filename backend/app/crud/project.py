@@ -48,3 +48,13 @@ def set_project_premium(db: Session, project_id: int) -> Optional[Project]:
     db.commit()
     db.refresh(db_project)
     return db_project
+
+def delete_project(db: Session, project_id: int) -> bool:
+    """Elimina un proyecto de la base de datos"""
+    db_project = get_project(db, project_id)
+    if not db_project:
+        return False
+    
+    db.delete(db_project)
+    db.commit()
+    return True

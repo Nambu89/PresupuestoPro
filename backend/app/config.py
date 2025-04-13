@@ -1,6 +1,7 @@
 import os
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
+from typing import ClassVar
 
 load_dotenv()
 
@@ -8,6 +9,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "PresupuestoPro API"
     API_V1_STR: str = "/api/v1"
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
+    VERSION: str = "1.0.0"
     
     # Configuración de la base de datos
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost/presupuestopro")
@@ -36,7 +38,10 @@ class Settings(BaseSettings):
     EMAILS_FROM_EMAIL: str = os.getenv("EMAILS_FROM_EMAIL", "info@presupuestopro.com")
     EMAILS_FROM_NAME: str = os.getenv("EMAILS_FROM_NAME", "PresupuestoPro")
 
-    class Config:
-        env_file = ".env"
+    # Configuración del modelo Pydantic (reemplaza la clase Config)
+    model_config = {
+        "env_file": ".env",
+        "extra": "ignore"  # Permite campos adicionales
+    }
 
 settings = Settings()

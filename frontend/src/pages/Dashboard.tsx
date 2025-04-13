@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, FileText, Download, Mail, MessageCircle, Search, Filter, ChevronDown } from "lucide-react";
+import { Plus, FileText, Download, Mail, MessageCircle, Search, Filter, ChevronDown, Trash2, AlertCircle } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import PDFViewer from "@/components/PDFViewer";
 import Layout from "@/components/layout/Layout";
 import { Input } from "@/components/ui/input";
 import {
@@ -43,6 +44,9 @@ const Dashboard = () => {
   const [chatResponse, setChatResponse] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [projects, setProjects] = useState([]);
+  const [viewingPdfProject, setViewingPdfProject] = useState<number | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<number | null>(null);
   
   // Función para cargar los proyectos desde el backend
   const loadProjects = async () => {
@@ -150,16 +154,12 @@ const Dashboard = () => {
 
   const handleViewComplete = async (projectId: number) => {
     try {
-      setIsLoading(true);
-      const token = localStorage.getItem('token');
-      
-      // Abrir el PDF en una nueva pestaña usando el endpoint de visualización
-      const url = `/api/v1/projects/${projectId}/view-pdf?token=${token}`;
-      window.open(url, '_blank');
+      // Mostrar el visor de PDF
+      setViewingPdfProject(projectId);
       
       toast({
         title: "Visualizando Presupuesto",
-        description: "Abriendo el presupuesto en una nueva pestaña.",
+        description: "Cargando el presupuesto...",
       });
     } catch (error) {
       console.error('Error al abrir el presupuesto:', error);
@@ -168,8 +168,6 @@ const Dashboard = () => {
         description: "No se pudo abrir el presupuesto. Inténtalo de nuevo más tarde.",
         variant: "destructive",
       });
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -177,15 +175,33 @@ const Dashboard = () => {
   const handleDownloadPDF = async (projectId: number) => {
     try {
       setIsLoading(true);
-      const token = localStorage.getItem('token');
+      
+      // Obtener el proyecto para usar su nombre en el archivo
+      const projectResponse = await axios.get(`/api/v1/projects/${projectId}`);
+      const projectName = projectResponse.data.name.replace(/ /g, '_');
+      
+      // Usar axios para obtener el PDF como blob
+      const response = await axios.get(`/api/v1/projects/${projectId}/pdf`, {
+        responseType: 'blob',
+        headers: {
+          'Accept': 'application/pdf'
+        }
+      });
+      
+      // Crear un objeto URL para el blob
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
       
       // Crear un enlace temporal para descargar el PDF
       const link = document.createElement('a');
-      link.href = `/api/v1/projects/${projectId}/pdf?token=${token}`;
-      link.target = '_blank';
+      link.href = url;
+      link.download = `presupuesto_${projectName}.pdf`;
       document.body.appendChild(link);
       link.click();
+      
+      // Limpiar
       document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
       
       toast({
         title: "PDF Descargado",
@@ -256,9 +272,53 @@ const Dashboard = () => {
       });
   };
 
+  // Función para mostrar el diálogo de confirmación de eliminación
+  const handleShowDeleteConfirmation = (projectId: number) => {
+    setProjectToDelete(projectId);
+    setDeleteDialogOpen(true);
+  };
+
+  // Función para eliminar un proyecto
+  const handleDeleteProject = async () => {
+    if (!projectToDelete) return;
+    
+    try {
+      setIsLoading(true);
+      
+      // Llamar al endpoint de eliminación
+      await axios.delete(`/api/v1/projects/${projectToDelete}`);
+      
+      // Actualizar la lista de proyectos eliminando el proyecto borrado
+      setProjects(projects.filter(project => project.id !== projectToDelete));
+      
+      // Cerrar el diálogo de confirmación
+      setDeleteDialogOpen(false);
+      setProjectToDelete(null);
+      
+      toast({
+        title: "Proyecto eliminado",
+        description: "El presupuesto se ha eliminado correctamente.",
+      });
+    } catch (error) {
+      console.error('Error al eliminar el proyecto:', error);
+      toast({
+        title: "Error",
+        description: "No se pudo eliminar el presupuesto. Inténtalo de nuevo más tarde.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <Layout hideFooter={true}>
-
+      {viewingPdfProject !== null && (
+        <PDFViewer 
+          projectId={viewingPdfProject} 
+          onClose={() => setViewingPdfProject(null)} 
+        />
+      )}
       <main className="container mx-auto px-4 py-8">
         <div className="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
@@ -315,14 +375,27 @@ const Dashboard = () => {
               <CardHeader className="pb-3">
                 <CardTitle className="flex justify-between items-start">
                   <span>{project.name}</span>
-                  <div className={`px-3 py-1 rounded-full text-xs font-medium ${
-                    project.isPremium 
-                      ? "bg-green-100 text-green-800" 
-                      : project.status === "Vista Previa" 
-                        ? "bg-blue-100 text-blue-800"
-                        : "bg-yellow-100 text-yellow-800"
-                  }`}>
-                    {project.status}
+                  <div className="flex items-center gap-2">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-6 w-6 text-gray-500 hover:text-red-500"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleShowDeleteConfirmation(project.id);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                    <div className={`px-3 py-1 rounded-full text-xs font-medium ${
+                      project.isPremium 
+                        ? "bg-green-100 text-green-800" 
+                        : project.status === "Vista Previa" 
+                          ? "bg-blue-100 text-blue-800"
+                          : "bg-yellow-100 text-yellow-800"
+                    }`}>
+                      {project.status}
+                    </div>
                   </div>
                 </CardTitle>
                 <CardDescription>
@@ -446,6 +519,40 @@ const Dashboard = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setChatOpen(false)}>
               Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo de confirmación para eliminar proyecto */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertCircle className="h-5 w-5" />
+              Confirmar eliminación
+            </DialogTitle>
+            <DialogDescription>
+              ¿Estás seguro de que deseas eliminar este presupuesto? Esta acción no se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <DialogFooter className="mt-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteDialogOpen(false);
+                setProjectToDelete(null);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteProject}
+              disabled={isLoading}
+            >
+              {isLoading ? "Eliminando..." : "Eliminar"}
             </Button>
           </DialogFooter>
         </DialogContent>

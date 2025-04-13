@@ -8,9 +8,10 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from sqlalchemy.orm import Session
 from app import crud, schemas
 from app.config import settings
-from app.models import User, Project
+# Importar todos los modelos para asegurar que se creen todas las tablas
+from app.models import User, Project, UserConfig
 from app.services.ai import AIProjectEstimator
-from app.database import SessionLocal
+from app.database import SessionLocal, Base, engine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -64,10 +65,21 @@ EXAMPLE_PROJECTS = [
     }
 ]
 
+def create_tables() -> None:
+    """
+    Crea todas las tablas definidas en los modelos
+    """
+    logger.info("Creando tablas en la base de datos...")
+    Base.metadata.create_all(bind=engine)
+    logger.info("Tablas creadas correctamente")
+
 def init_db() -> None:
     """
     Inicializa la base de datos con datos de ejemplo
     """
+    # Primero crear todas las tablas
+    create_tables()
+    
     db = SessionLocal()
     try:
         # Crear usuario administrador si no existe

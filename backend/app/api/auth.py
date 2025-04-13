@@ -1,15 +1,17 @@
 from datetime import timedelta
 from typing import Any
+from pydantic import BaseModel
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
-from app.core.security import create_access_token, settings
-from app.crud.user import authenticate_user, create_user
-from app.schemas.user import User, UserCreate, UserLogin
+from app.api.deps import get_db, get_current_user
+from app.core.security import create_access_token, settings, verify_password, get_password_hash
+from app.crud.user import authenticate_user, create_user, get_user, update_user
+from app.schemas.user import User, UserCreate, UserLogin, UserUpdate
 from app.schemas.token import Token
+from app.models.user import User as UserModel
 
 router = APIRouter()
 
@@ -55,3 +57,52 @@ def register_user(
     """
     user = create_user(db, user_in)
     return user
+
+@router.get("/me", response_model=User)
+def get_current_user_profile(
+    current_user: UserModel = Depends(get_current_user),
+) -> Any:
+    """
+    Get current user profile
+    """
+    return current_user
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+@router.post("/change-password")
+def change_password(
+    *,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+    password_data: PasswordChange,
+) -> Any:
+    """
+    Change user password
+    """
+    try:
+        print(f"Intentando cambiar contraseña para usuario ID: {current_user.id}")
+        print(f"Datos recibidos: {password_data}")
+        
+        # Verificar que la contraseña actual sea correcta
+        if not verify_password(password_data.current_password, current_user.hashed_password):
+            print(f"Contraseña actual incorrecta para usuario ID: {current_user.id}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Incorrect password",
+            )
+        
+        # Actualizar la contraseña
+        hashed_password = get_password_hash(password_data.new_password)
+        user_in = UserUpdate(hashed_password=hashed_password)
+        user = update_user(db, db_obj=current_user, obj_in=user_in)
+        print(f"Contraseña actualizada correctamente para usuario ID: {current_user.id}")
+        
+        return {"message": "Password updated successfully"}
+    except Exception as e:
+        print(f"Error al cambiar contraseña: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error changing password: {str(e)}",
+        )

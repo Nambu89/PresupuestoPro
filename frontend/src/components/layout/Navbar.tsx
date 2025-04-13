@@ -34,8 +34,12 @@ const Navbar: React.FC<NavbarProps> = ({ isAuthenticated = false }) => {
   };
 
   const handleLogout = () => {
-    // Eliminar el token de autenticación
+    // Eliminar el token de autenticación y cualquier otro dato de sesión
     localStorage.removeItem("token");
+    sessionStorage.clear(); // Limpiar cualquier dato en sessionStorage
+    
+    // Forzar la actualización del estado de autenticación
+    setIsMenuOpen(false);
     
     toast({
       title: "Sesión cerrada",
@@ -43,8 +47,12 @@ const Navbar: React.FC<NavbarProps> = ({ isAuthenticated = false }) => {
       variant: "default",
     });
     
-    // Redirigir al inicio
-    navigate("/");
+    // Redirigir al inicio con un pequeño retraso para asegurar que se limpie todo
+    setTimeout(() => {
+      navigate("/", { replace: true });
+      // Forzar recarga de la página para asegurar que se reinicie todo el estado
+      window.location.reload();
+    }, 100);
   };
 
   const isActive = (path: string) => {
@@ -52,7 +60,7 @@ const Navbar: React.FC<NavbarProps> = ({ isAuthenticated = false }) => {
   };
 
   return (
-    <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
+    <header className="bg-background shadow-sm border-b border-border sticky top-0 z-50">
       <div className="container mx-auto px-4 py-4">
         <div className="flex justify-between items-center">
           {/* Logo */}
@@ -67,18 +75,39 @@ const Navbar: React.FC<NavbarProps> = ({ isAuthenticated = false }) => {
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center space-x-8">
-            <Link 
-              to="/features" 
-              className={`text-sm font-medium ${isActive("/features") ? "text-primary-blue" : "text-gray-600 hover:text-gray-900"}`}
-            >
-              Características
-            </Link>
-            <Link 
-              to="/pricing" 
-              className={`text-sm font-medium ${isActive("/pricing") ? "text-primary-blue" : "text-gray-600 hover:text-gray-900"}`}
-            >
-              Precios
-            </Link>
+            {isAuthenticated ? (
+              <>
+                <Link 
+                  to="/features" 
+                  className={`text-sm font-medium ${isActive("/features") ? "text-primary-blue" : "text-gray-600 hover:text-gray-900"}`}
+                  state={{ authenticated: true }}
+                >
+                  Características
+                </Link>
+                <Link 
+                  to="/pricing" 
+                  className={`text-sm font-medium ${isActive("/pricing") ? "text-primary-blue" : "text-gray-600 hover:text-gray-900"}`}
+                  state={{ authenticated: true }}
+                >
+                  Precios
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link 
+                  to="/features" 
+                  className={`text-sm font-medium ${isActive("/features") ? "text-primary-blue" : "text-gray-600 hover:text-gray-900"}`}
+                >
+                  Características
+                </Link>
+                <Link 
+                  to="/pricing" 
+                  className={`text-sm font-medium ${isActive("/pricing") ? "text-primary-blue" : "text-gray-600 hover:text-gray-900"}`}
+                >
+                  Precios
+                </Link>
+              </>
+            )}
             {isAuthenticated ? (
               <div className="flex items-center space-x-4">
                 <Link to="/dashboard">
@@ -142,20 +171,43 @@ const Navbar: React.FC<NavbarProps> = ({ isAuthenticated = false }) => {
         {isMenuOpen && (
           <div className="md:hidden mt-4 py-4 border-t border-gray-100">
             <nav className="flex flex-col space-y-4">
-              <Link
-                to="/features"
-                className={`text-sm font-medium ${isActive("/features") ? "text-primary-blue" : "text-gray-600"}`}
-                onClick={toggleMenu}
-              >
-                Características
-              </Link>
-              <Link
-                to="/pricing"
-                className={`text-sm font-medium ${isActive("/pricing") ? "text-primary-blue" : "text-gray-600"}`}
-                onClick={toggleMenu}
-              >
-                Precios
-              </Link>
+              {isAuthenticated ? (
+                <>
+                  <Link
+                    to="/features"
+                    className={`text-sm font-medium ${isActive("/features") ? "text-primary-blue" : "text-gray-600"}`}
+                    onClick={toggleMenu}
+                    state={{ authenticated: true }}
+                  >
+                    Características
+                  </Link>
+                  <Link
+                    to="/pricing"
+                    className={`text-sm font-medium ${isActive("/pricing") ? "text-primary-blue" : "text-gray-600"}`}
+                    onClick={toggleMenu}
+                    state={{ authenticated: true }}
+                  >
+                    Precios
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link
+                    to="/features"
+                    className={`text-sm font-medium ${isActive("/features") ? "text-primary-blue" : "text-gray-600"}`}
+                    onClick={toggleMenu}
+                  >
+                    Características
+                  </Link>
+                  <Link
+                    to="/pricing"
+                    className={`text-sm font-medium ${isActive("/pricing") ? "text-primary-blue" : "text-gray-600"}`}
+                    onClick={toggleMenu}
+                  >
+                    Precios
+                  </Link>
+                </>
+              )}
               {isAuthenticated ? (
                 <>
                   <Link
