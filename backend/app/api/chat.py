@@ -1,6 +1,7 @@
-from typing import Any, List
+# backend/app/api/chat.py
+from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -17,14 +18,14 @@ ai_chat = AIChat()
 class ChatQuery(BaseModel):
     query: str
 
-@router.post("/{project_id}")
+@router.post("/{project_id}/chat")
 def chat_with_ai(
     *,
     project_id: int,
     chat_query: ChatQuery,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> Any:
+) -> Dict[str, Any]:
     """
     Consultar a la IA sobre un proyecto específico
     """
@@ -38,4 +39,15 @@ def chat_with_ai(
     # Obtener respuesta de la IA
     response = ai_chat.get_response(project, chat_query.query)
     
-    return response
+    # Asegurarse de que la respuesta incluye los campos necesarios
+    response_dict = response
+    if not isinstance(response, dict):
+        response_dict = {"response": str(response)}
+    
+    # Agregar campos necesarios si no existen
+    if "document_reference" not in response_dict:
+        response_dict["document_reference"] = None
+    if "is_modification_request" not in response_dict:
+        response_dict["is_modification_request"] = False
+    
+    return response_dict

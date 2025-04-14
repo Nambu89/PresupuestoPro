@@ -3,7 +3,35 @@ import random
 import json
 import os
 import requests
+import re
+import time
 from dotenv import load_dotenv
+from prometheus_client import Counter, Histogram, Summary
+
+# Métricas de Prometheus para monitorizar la API de IA
+AI_API_CALLS = Counter(
+    'presupuestopro_ai_api_calls_total',
+    'Número total de llamadas a la API de IA',
+    ['endpoint', 'status']
+)
+
+AI_API_LATENCY = Histogram(
+    'presupuestopro_ai_api_latency_seconds',
+    'Latencia de las llamadas a la API de IA',
+    ['endpoint']
+)
+
+AI_TOKEN_USAGE = Counter(
+    'presupuestopro_ai_token_usage_total',
+    'Número total de tokens utilizados en la API de IA',
+    ['endpoint', 'type']
+)
+
+AI_FALLBACK_USAGE = Counter(
+    'presupuestopro_ai_fallback_usage_total',
+    'Número de veces que se ha utilizado el sistema de respaldo',
+    ['reason']
+)
 
 # Cargar variables de entorno
 load_dotenv()
@@ -40,6 +68,8 @@ class AIProjectEstimator:
         try:
             if not self.api_key:
                 print("API key no encontrada. Usando estimación simulada.")
+                # Registrar uso de fallback por falta de API key
+                AI_FALLBACK_USAGE.labels(reason='no_api_key').inc()
                 return self._generate_fallback_estimate(project_data)
                 
             # Preparar los datos para la API
@@ -68,6 +98,7 @@ class AIProjectEstimator:
                     print(f"Error al procesar la respuesta de la IA: {e}")
             
             # Si algo falla, usar la estimación de respaldo
+            AI_FALLBACK_USAGE.labels(reason='processing_error').inc()
             return self._generate_fallback_estimate(project_data)
             
         except Exception as e:
@@ -78,6 +109,9 @@ class AIProjectEstimator:
         """
         Realizar la llamada a la API de IA
         """
+        start_time = time.time()
+        endpoint = "estimate"
+        
         try:
             headers = {
                 "Content-Type": "application/json",
@@ -107,12 +141,34 @@ class AIProjectEstimator:
             print(f"Código de estado de la respuesta: {response.status_code}")
             print(f"Respuesta de la API: {response.text[:500]}..." if len(response.text) > 500 else f"Respuesta de la API: {response.text}")
             
+            # Registrar métricas
+            duration = time.time() - start_time
+            AI_API_LATENCY.labels(endpoint=endpoint).observe(duration)
+            
             response.raise_for_status()
-            return response.json()
+            response_json = response.json()
+            
+            # Registrar uso de tokens si está disponible
+            if 'usage' in response_json:
+                AI_TOKEN_USAGE.labels(endpoint=endpoint, type='prompt').inc(response_json['usage'].get('prompt_tokens', 0))
+                AI_TOKEN_USAGE.labels(endpoint=endpoint, type='completion').inc(response_json['usage'].get('completion_tokens', 0))
+                AI_TOKEN_USAGE.labels(endpoint=endpoint, type='total').inc(response_json['usage'].get('total_tokens', 0))
+            
+            # Registrar llamada exitosa
+            AI_API_CALLS.labels(endpoint=endpoint, status='success').inc()
+            
+            return response_json
         except Exception as e:
             print(f"Error al llamar a la API de IA: {e}")
             if hasattr(e, 'response') and hasattr(e.response, 'text'):
                 print(f"Respuesta de error detallada: {e.response.text}")
+                
+            # Registrar llamada fallida
+            AI_API_CALLS.labels(endpoint=endpoint, status='error').inc()
+            
+            # Registrar duración incluso en caso de error
+            duration = time.time() - start_time
+            AI_API_LATENCY.labels(endpoint=endpoint).observe(duration)
             return None
     
     def _prepare_prompt(self, project_data: str) -> str:
@@ -422,7 +478,7 @@ class AIProjectEstimator:
             project_data: Descripción del proyecto proporcionada por el usuario
             
         Returns:
-            Descripción profesional del proyecto
+            Descripción profesional del proyecto en formato texto plano
         """
         try:
             if not self.api_key:
@@ -444,8 +500,7 @@ class AIProjectEstimator:
             3. Las funcionalidades clave
             4. Los beneficios esperados o valor añadido
             
-            
-            IMPORTANTE: Responde ÚNICAMENTE con la descripción profesional, sin explicaciones adicionales ni preguntas.
+            IMPORTANTE: Responde ÚNICAMENTE con texto plano. No incluyas etiquetas HTML, Markdown u otros formatos de texto. No añadas números o viñetas.
             """
             
             # Llamar a la API
@@ -457,7 +512,7 @@ class AIProjectEstimator:
             data = {
                 "model": "gpt-4o-mini",
                 "messages": [
-                    {"role": "system", "content": "Eres un consultor profesional de TI especializado en redactar descripciones de proyectos para presupuestos formales."},
+                    {"role": "system", "content": "Eres un consultor profesional de TI especializado en redactar descripciones de proyectos para presupuestos formales. Responde siempre en texto plano sin formato HTML o Markdown."},
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": 0.7
@@ -469,6 +524,8 @@ class AIProjectEstimator:
             
             if 'choices' in response_json and len(response_json['choices']) > 0:
                 description = response_json['choices'][0]['message']['content'].strip()
+                # Asegurar que es texto plano eliminando etiquetas HTML
+                description = self._strip_html_tags(description)
                 return description
             else:
                 print("Respuesta de IA incompleta, usando descripción por defecto")
@@ -477,6 +534,70 @@ class AIProjectEstimator:
         except Exception as e:
             print(f"Error al generar descripción con IA: {e}")
             return self._generate_fallback_description(project_data)
+    
+    def generate_functionalities_description(self, project_data: str) -> str:
+        """
+        Genera una lista de funcionalidades principales del proyecto utilizando IA
+        
+        Args:
+            project_data: Descripción del proyecto proporcionada por el usuario
+            
+        Returns:
+            Lista de funcionalidades en formato texto plano
+        """
+        try:
+            if not self.api_key:
+                print("API key no encontrada. Usando funcionalidades por defecto.")
+                return self._generate_fallback_functionalities(project_data)
+                
+            # Preparar el prompt para la API
+            prompt = f"""
+            Actúa como un consultor profesional de TI. Dado el siguiente proyecto:
+            
+            {project_data}
+            
+            Genera una lista de 3-5 funcionalidades principales para este proyecto. 
+            Cada funcionalidad debe ser breve (una línea) y clara, enfocándose en los aspectos más importantes.
+            
+            IMPORTANTE: Responde ÚNICAMENTE con la lista de funcionalidades, una por línea. 
+            No uses HTML ni Markdown. Usa un formato simple con guiones o viñetas al inicio de cada línea.
+            Por ejemplo:
+            - Funcionalidad 1
+            - Funcionalidad 2
+            - Funcionalidad 3
+            """
+            
+            # Llamar a la API
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}"
+            }
+            
+            data = {
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {"role": "system", "content": "Eres un consultor profesional de TI especializado en identificar funcionalidades clave para proyectos. Responde siempre en texto plano sin formato HTML."},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7
+            }
+            
+            response = requests.post(self.api_url, headers=headers, json=data)
+            response.raise_for_status()
+            response_json = response.json()
+            
+            if 'choices' in response_json and len(response_json['choices']) > 0:
+                functionalities = response_json['choices'][0]['message']['content'].strip()
+                # Asegurar que es texto plano
+                functionalities = self._strip_html_tags(functionalities)
+                return functionalities
+            else:
+                print("Respuesta de IA incompleta, usando funcionalidades por defecto")
+                return self._generate_fallback_functionalities(project_data)
+                
+        except Exception as e:
+            print(f"Error al generar funcionalidades con IA: {e}")
+            return self._generate_fallback_functionalities(project_data)
     
     def _generate_fallback_description(self, project_data: str) -> str:
         """
@@ -505,6 +626,80 @@ La solución incluirá todas las funcionalidades solicitadas por el cliente, con
 El resultado final será un sistema robusto que aportará valor añadido al negocio, mejorando la productividad y facilitando la toma de decisiones."""
         
         return description
+    
+    def _generate_fallback_functionalities(self, project_data: str) -> str:
+        """
+        Genera funcionalidades de respaldo en caso de que la API falle
+        
+        Args:
+            project_data: Descripción del proyecto proporcionada por el usuario
+            
+        Returns:
+            Funcionalidades de respaldo
+        """
+        # Generar funcionalidades genéricas basadas en el tipo de proyecto
+        project_type = "desarrollo de software"
+        for line in project_data.split('\n'):
+            if line.startswith("Tipo de proyecto:"):
+                project_type = line.split(":", 1)[1].strip().lower()
+                break
+        
+        # Funcionalidades genéricas basadas en el tipo de proyecto
+        if "web" in project_type:
+            return """• Interfaz de usuario intuitiva y responsive
+- Sistema de autenticación y gestión de usuarios
+- Panel de administración para gestión de contenidos
+- Generación de informes y exportación de datos"""
+        elif "móvil" in project_type or "mobile" in project_type or "app" in project_type:
+            return """• Interfaz de usuario optimizada para dispositivos móviles
+- Sincronización de datos con servidor central
+- Notificaciones push personalizadas
+- Modo offline para funcionalidades básicas"""
+        elif "ai" in project_type or "inteligencia artificial" in project_type:
+            return """• Módulo de procesamiento de datos y análisis
+- Algoritmos de aprendizaje automático personalizados
+- Dashboard para visualización de resultados
+- API para integración con sistemas existentes"""
+        else:
+            return """• Funcionalidad principal de gestión de datos
+- Interfaz de usuario intuitiva y amigable
+- Sistema de reportes y análisis
+- Integración con sistemas existentes"""
+    
+    def _strip_html_tags(self, text: str) -> str:
+        """
+        Elimina etiquetas HTML y Markdown del texto
+        
+        Args:
+            text: Texto que puede contener etiquetas
+            
+        Returns:
+            Texto limpio sin etiquetas
+        """
+        if not text:
+            return ""
+            
+        # Eliminar etiquetas HTML
+        clean = re.compile('<.*?>')
+        text = re.sub(clean, '', text)
+        
+        # Reemplazar entidades HTML comunes
+        text = text.replace('&nbsp;', ' ')
+        text = text.replace('&lt;', '<')
+        text = text.replace('&gt;', '>')
+        text = text.replace('&amp;', '&')
+        text = text.replace('&quot;', '"')
+        
+        # Eliminar formato Markdown básico
+        # Eliminar encabezados (#, ##, etc.)
+        text = re.sub(r'^#+\s+', '', text, flags=re.MULTILINE)
+        # Eliminar negrita y cursiva
+        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+        text = re.sub(r'\*(.*?)\*', r'\1', text)
+        text = re.sub(r'__(.*?)__', r'\1', text)
+        text = re.sub(r'_(.*?)_', r'\1', text)
+        
+        return text
     
     def _generate_team_composition(self, hours_by_role):
         """Genera una sugerencia de composición del equipo"""

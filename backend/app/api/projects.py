@@ -1,8 +1,10 @@
-from typing import Any, List
+from typing import Any, List, Dict, Optional
 import os
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Response, Request
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from app.api.deps import get_current_user, get_db
 from app.crud.project import create_project, get_project, get_user_projects, update_project, delete_project
@@ -12,6 +14,14 @@ from app.schemas.project import Project as ProjectSchema, ProjectCreate, Project
 from app.services.ai import AIProjectEstimator
 from app.services.pdf_generator import PDFGenerator
 from app.services.email_sender import EmailSender
+
+# Modelo para la solicitud de edición directa
+class ProjectEditRequest(BaseModel):
+    section: Optional[str] = None
+    type: str  # 'cost', 'time', 'content'
+    value: Optional[float] = None
+    unit: Optional[str] = None
+    content: Optional[str] = None
 
 router = APIRouter()
 
@@ -216,6 +226,166 @@ def delete_user_project(
     except Exception as e:
         print(f"Error al eliminar proyecto: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error deleting project: {str(e)}")
+
+
+@router.post("/{project_id}/edit", response_model=Dict[str, Any])
+def edit_project_direct(
+    *,
+    project_id: int,
+    edit_request: ProjectEditRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    Editar un proyecto directamente desde el chat de IA
+    """
+    try:
+        # Verificar que el proyecto existe y pertenece al usuario
+        project = get_project(db, project_id=project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if project.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not enough permissions")
+        
+        # Cargar los datos actuales del proyecto
+        project_data = json.loads(project.data) if project.data else {}
+        
+        print(f"Solicitud de edición recibida: {edit_request.dict()}")
+        print(f"Datos actuales del proyecto: {project_data}")
+        
+        # Realizar la modificación según el tipo
+        if edit_request.type == 'cost':
+            print(f"Modificando coste a: {edit_request.value} {edit_request.unit or '€'}")
+            # Modificar el coste del proyecto
+            if 'cost' not in project_data:
+                project_data['cost'] = {}
+            
+            project_data['cost']['amount'] = edit_request.value
+            project_data['cost']['currency'] = edit_request.unit or '€'
+            
+            # Actualizar también el campo de coste en el modelo principal
+            project.cost = float(edit_request.value) if edit_request.value is not None else project.cost
+            print(f"Coste actualizado en el modelo: {project.cost}")
+            
+        elif edit_request.type == 'time':
+            print(f"Modificando plazo a: {edit_request.value} {edit_request.unit or 'semanas'}")
+            # Modificar el plazo/duración del proyecto
+            if 'timeline' not in project_data:
+                project_data['timeline'] = {}
+            
+            # Asegurarnos de que el valor sea un número válido
+            if edit_request.value is not None:
+                try:
+                    duration_value = float(edit_request.value)
+                    project_data['timeline']['duration'] = duration_value
+                    project_data['timeline']['unit'] = edit_request.unit or 'semanas'
+                    
+                    # Actualizar también el campo de duración en el modelo principal
+                    project.estimated_duration_weeks = duration_value
+                    print(f"Duración actualizada en el modelo: {project.estimated_duration_weeks}")
+                    
+                    # Crear o actualizar el contenido de la sección de planificación
+                    if edit_request.content:
+                        project_data['timeline']['content'] = edit_request.content
+                    else:
+                        # Generar un contenido estándar si no se proporciona uno personalizado
+                        project_data['timeline']['content'] = f"La duración estimada del proyecto es de {duration_value} {edit_request.unit or 'semanas'}."
+                        
+                    # Asegurarnos de que haya una estructura de fases
+                    if 'phases' not in project_data['timeline']:
+                        # Crear una estructura de fases estándar
+                        total_weeks = duration_value
+                        project_data['timeline']['phases'] = [
+                            {"name": "Análisis y planificación", "duration": max(1, round(total_weeks * 0.2))},
+                            {"name": "Desarrollo", "duration": max(1, round(total_weeks * 0.5))},
+                            {"name": "Pruebas y correcciones", "duration": max(1, round(total_weeks * 0.2))},
+                            {"name": "Implementación final", "duration": max(1, round(total_weeks * 0.1))}
+                        ]
+                        
+                        # Ajustar las fases para que sumen exactamente el total
+                        sum_phases = sum(phase["duration"] for phase in project_data['timeline']['phases'])
+                        if sum_phases != total_weeks:
+                            diff = total_weeks - sum_phases
+                            project_data['timeline']['phases'][1]["duration"] += diff  # Ajustar la fase de desarrollo
+                except (ValueError, TypeError) as e:
+                    print(f"Error al convertir el valor de duración: {e}")
+                    raise HTTPException(status_code=400, detail=f"El valor de duración no es válido: {edit_request.value}")
+        
+        elif edit_request.type == 'content':
+            # Modificar cualquier otra sección del documento
+            if edit_request.section and edit_request.section != 'general':
+                # Identificar la sección a modificar
+                section_key = None
+                if '1. OBJETO' in edit_request.section:
+                    section_key = 'objective'
+                elif '2. DESCRIPCIÓN' in edit_request.section:
+                    section_key = 'description'
+                elif '2.1 FUNCIONALIDADES' in edit_request.section:
+                    section_key = 'features'
+                elif '3. PLANIFICACIÓN' in edit_request.section:
+                    section_key = 'timeline'
+                elif '4. COSTE' in edit_request.section:
+                    section_key = 'cost'
+                elif '5. FIRMAS' in edit_request.section:
+                    section_key = 'signatures'
+                
+                if section_key:
+                    # Si la sección no existe, crearla
+                    if section_key not in project_data:
+                        project_data[section_key] = {}
+                    
+                    # Actualizar el contenido de la sección
+                    if isinstance(project_data[section_key], dict):
+                        project_data[section_key]['content'] = edit_request.content
+                    else:
+                        project_data[section_key] = edit_request.content
+            else:
+                # Modificación general (podría ser el nombre o la descripción general)
+                if edit_request.content:
+                    # Intentar actualizar campos generales
+                    project.description = edit_request.content
+        
+        # Guardar los cambios en la base de datos
+        try:
+            print(f"Guardando datos actualizados: {project_data}")
+            project.data = json.dumps(project_data)
+            db.commit()
+            db.refresh(project)
+            print(f"Cambios guardados en la base de datos")
+        except Exception as db_error:
+            print(f"Error al guardar en la base de datos: {db_error}")
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Error al guardar en la base de datos: {str(db_error)}")
+        
+        # Regenerar el PDF con los cambios
+        try:
+            print(f"Regenerando PDF para el proyecto {project.id}")
+            pdf_path = pdf_generator.generate_pdf(project)
+            print(f"PDF regenerado correctamente: {pdf_path}")
+        except Exception as pdf_error:
+            print(f"Error al regenerar el PDF: {pdf_error}")
+            # No fallamos la operación completa si solo falla la generación del PDF
+            # El usuario aún podrá ver los cambios en la interfaz
+        
+        response_data = {
+            "message": "Proyecto actualizado correctamente",
+            "project_id": project.id,
+            "section": edit_request.section,
+            "type": edit_request.type,
+            "value": edit_request.value,
+            "unit": edit_request.unit
+        }
+        
+        print(f"Respuesta de éxito: {response_data}")
+        return response_data
+        
+    except Exception as e:
+        print(f"Error al editar proyecto: {e}")
+        try:
+            db.rollback()
+        except:
+            pass
+        raise HTTPException(status_code=500, detail=f"Error al editar proyecto: {str(e)}")
 
 @router.get("/{project_id}/view-pdf")
 def view_project_pdf(

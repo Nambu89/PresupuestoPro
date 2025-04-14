@@ -254,9 +254,9 @@ const Dashboard = () => {
   // Función para enviar consulta al chat
   const handleSendChatQuery = () => {
     if (!chatQuery.trim()) return;
-    
+
     setIsLoading(true);
-    axios.post(`/api/v1/chat/${chatProjectId}`, { query: chatQuery })
+    axios.post(`/api/v1/projects/${chatProjectId}/chat`, { query: chatQuery })
       .then((response) => {
         setChatResponse(response.data.response);
         setIsLoading(false);
@@ -455,25 +455,8 @@ const Dashboard = () => {
                     <Button 
                       variant="default" 
                       size="sm"
-                      onClick={() => {
-                        // Crear un formulario para hacer la solicitud con el token
-                        const form = document.createElement('form');
-                        form.method = 'GET';
-                        form.action = `/api/v1/projects/${project.id}`;
-                        form.target = '_blank';
-                        
-                        // Agregar el token como campo oculto
-                        const tokenField = document.createElement('input');
-                        tokenField.type = 'hidden';
-                        tokenField.name = 'token';
-                        tokenField.value = localStorage.getItem('token') || '';
-                        form.appendChild(tokenField);
-                        
-                        // Agregar el formulario al documento y enviarlo
-                        document.body.appendChild(form);
-                        form.submit();
-                        document.body.removeChild(form);
-                      }}
+                      onClick={() => handleViewComplete(project.id)}
+                      disabled={isLoading}
                     >
                       <FileText className="h-4 w-4 mr-1" /> Ver completo
                     </Button>

@@ -127,13 +127,13 @@ class PDFGenerator:
         
         canvas.restoreState()
     
-    def _create_footer(self, canvas, doc):
-        """Crea el pie de página del PDF"""
+    def _create_footer(self, canvas, doc, total_pages=4):
+        """Crea el pie de página del PDF con número total de páginas correcto"""
         canvas.saveState()
         
-        # Número de página
+        # Número de página con total correcto
         canvas.setFont('Helvetica', 9)
-        text = f"Página {doc.page} de 3"
+        text = f"Página {doc.page} de {total_pages}"
         canvas.drawRightString(doc.width + doc.leftMargin, doc.bottomMargin - 10*mm, text)
         
         # Logo pequeño en la esquina derecha
@@ -151,6 +151,9 @@ class PDFGenerator:
         """
         buffer = BytesIO()
         
+        # Calcular número total de páginas (aproximación)
+        total_pages = 4  # Ahora estimamos 4 páginas (portada, índice, contenido, firmas)
+        
         # Crear el documento PDF
         doc = SimpleDocTemplate(
             buffer,
@@ -165,7 +168,7 @@ class PDFGenerator:
         def add_page_elements(canvas, doc):
             if doc.page > 1:  # No mostrar encabezado en la portada
                 self._create_header(canvas, doc, project)
-            self._create_footer(canvas, doc)
+            self._create_footer(canvas, doc, total_pages)
         
         # Contenido del PDF
         content = []
@@ -223,7 +226,7 @@ class PDFGenerator:
         content.append(Spacer(1, 5*cm))
         content.append(Paragraph(f"{datetime.datetime.now().strftime('%d de %B de %Y')}", date_style))
         
-        # Información de contacto
+        # Información de contacto (sin email)
         contact_style = ParagraphStyle(
             'Contact',
             parent=self.styles['Normal'],
@@ -231,7 +234,7 @@ class PDFGenerator:
             alignment=TA_CENTER,
             textColor=colors.gray
         )
-        contact_text = f"Servicios Profesionales PresupuestoPro S.L. - email: {user.email}"
+        contact_text = f"Servicios Profesionales PresupuestoPro S.L."  # Eliminamos el email
         content.append(Spacer(1, 1*cm))
         content.append(Paragraph(contact_text, contact_style))
         
@@ -313,15 +316,18 @@ class PDFGenerator:
             # Utilizar la IA para generar una descripción profesional
             ai_description = self.ai_estimator.generate_project_description(description)
             
+            # Asegurar que la descripción esté en formato de texto plano
+            ai_description = self._strip_html_tags(ai_description)
+            
             # Verificar si se obtuvo una descripción válida
             if ai_description and len(ai_description) > 50:  # Asegurarse de que la descripción tiene contenido sustancial
-                # Formatear la descripción para el PDF
-                paragraphs = ai_description.split('\n\n')
-                
                 # Si hay un tipo de proyecto, mencionarlo primero
                 if project_type:
-                    content.append(Paragraph(f"Se desarrollará un proyecto de <b>{project_type}</b> con las siguientes características:", self.styles['Normal']))
+                    content.append(Paragraph(f"Se desarrollará un proyecto de {project_type} con las siguientes características:", self.styles['Normal']))
                     content.append(Spacer(1, 0.2*cm))
+                
+                # Formatear la descripción para el PDF - como texto plano
+                paragraphs = ai_description.split('\n\n')
                 
                 # Añadir cada párrafo de la descripción generada por IA
                 for paragraph in paragraphs:
@@ -331,7 +337,7 @@ class PDFGenerator:
             else:
                 # Si la IA no generó una descripción válida, usar un enfoque alternativo
                 if project_type:
-                    content.append(Paragraph(f"Se desarrollará un proyecto de <b>{project_type}</b> que permitirá optimizar procesos y mejorar la eficiencia operativa.", self.styles['Normal']))
+                    content.append(Paragraph(f"Se desarrollará un proyecto de {project_type} que permitirá optimizar procesos y mejorar la eficiencia operativa.", self.styles['Normal']))
                 else:
                     content.append(Paragraph(f"El proyecto consiste en el desarrollo de una solución tecnológica que permitirá optimizar procesos y mejorar la eficiencia operativa.", self.styles['Normal']))
                 content.append(Spacer(1, 0.2*cm))
@@ -354,24 +360,47 @@ class PDFGenerator:
                 funcionalidades = line.split(":", 1)[1].strip()
                 break
         
-        if funcionalidades:
-            # Si hay funcionalidades especificadas, mostrarlas
-            content.append(Paragraph("El proyecto incluirá las siguientes funcionalidades principales:", self.styles['Normal']))
-            content.append(Spacer(1, 0.2*cm))
+        # En lugar de usar las funcionalidades extraídas, generar nuevas con IA
+        try:
+            # Generar funcionalidades con IA basadas en la descripción
+            ai_funcionalidades = self.ai_estimator.generate_functionalities_description(description)
+            ai_funcionalidades = self._strip_html_tags(ai_funcionalidades)
             
-            # Intentar dividir las funcionalidades en una lista si están separadas por puntos o comas
-            if '.' in funcionalidades or ',' in funcionalidades:
-                items = [item.strip() for item in funcionalidades.replace('.', ',').split(',') if item.strip()]
+            if ai_funcionalidades and len(ai_funcionalidades) > 10:
+                content.append(Paragraph("El proyecto incluirá las siguientes funcionalidades principales:", self.styles['Normal']))
+                content.append(Spacer(1, 0.2*cm))
+                
+                # Convertir texto de IA en elementos de lista
+                items = [item.strip() for item in ai_funcionalidades.split('\n') if item.strip()]
+                
                 for item in items:
-                    if item:
+                    if item.startswith('•') or item.startswith('-'):
+                        # Ya viene con viñeta, eliminarla para añadir nuestra propia viñeta
+                        item = item[1:].strip()
+                    content.append(Paragraph(f"• {item}", self.styles['Normal']))
+                    content.append(Spacer(1, 0.1*cm))
+            else:
+                # Si no hay funcionalidades específicas, mostrar un mensaje genérico
+                content.append(Paragraph("El proyecto incluirá las siguientes funcionalidades principales:", self.styles['Normal']))
+                content.append(Spacer(1, 0.2*cm))
+                
+                # Usar las funcionalidades que proporcionó el usuario directamente
+                if funcionalidades:
+                    items = [item.strip() for item in funcionalidades.replace('.', ',').split(',') if item.strip()]
+                    for item in items:
                         content.append(Paragraph(f"• {item}", self.styles['Normal']))
                         content.append(Spacer(1, 0.1*cm))
-            else:
-                # Si no se pueden dividir, mostrar como texto normal
-                content.append(Paragraph(funcionalidades, self.styles['Normal']))
-        else:
-            # Si no hay funcionalidades especificadas, mostrar un texto genérico
+                else:
+                    content.append(Paragraph("• Funcionalidad principal 1", self.styles['Normal']))
+                    content.append(Spacer(1, 0.1*cm))
+                    content.append(Paragraph("• Funcionalidad principal 2", self.styles['Normal']))
+                    content.append(Spacer(1, 0.1*cm))
+                    content.append(Paragraph("• Funcionalidad principal 3", self.styles['Normal']))
+        except Exception as e:
+            print(f"Error al generar funcionalidades con IA: {e}")
+            # En caso de error, usar funcionalidades genéricas
             content.append(Paragraph("El proyecto incluirá todas las funcionalidades necesarias para cumplir con los objetivos establecidos, garantizando una solución completa y eficiente.", self.styles['Normal']))
+            
         content.append(Spacer(1, 0.5*cm))
         
         # 3. PLANIFICACIÓN
@@ -404,12 +433,14 @@ class PDFGenerator:
         description_parts = project.description.split('\n', 1)
         client_name = description_parts[0] if len(description_parts) > 1 else 'Cliente'
         
-        # Tabla para firmas
+        # Tabla para firmas (mejorada)
         firma_data = [
             [Paragraph(f"<b>Por {user.first_name} {user.last_name}:</b>", self.styles['Normal']), Paragraph(f"<b>Por {client_name}:</b>", self.styles['Normal'])],
-            [Paragraph(f"Usuario de PresupuestoPro", self.styles['Normal']), Paragraph(f"Cliente", self.styles['Normal'])],
-            [Paragraph("", self.styles['Normal']), Paragraph("", self.styles['Normal'])],
-            [Paragraph("", self.styles['Normal']), Paragraph("", self.styles['Normal'])],
+            # Eliminar "Usuario de PresupuestoPro"
+            ["", ""],  # Espacio para firma
+            ["", ""],  # Espacio para firma
+            ["", ""],  # Espacio para firma
+            ["", ""],  # Espacio adicional para firma
             [Paragraph("_____________________________", self.styles['Normal']), Paragraph("_____________________________", self.styles['Normal'])],
             [Paragraph("Firma y sello", self.styles['Normal']), Paragraph("Firma y sello", self.styles['Normal'])]
         ]
@@ -418,9 +449,8 @@ class PDFGenerator:
         firma_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('BOTTOMPADDING', (2, 0), (3, 1), 20),  # Espacio para firmar
+            ('BOTTOMPADDING', (0, 1), (1, 4), 20),  # Espacio para firmar (más grande)
             ('TOPPADDING', (0, 0), (-1, 0), 10),
-            ('TOPPADDING', (0, 1), (-1, 1), 5),
         ]))
         
         content.append(firma_table)
@@ -436,3 +466,23 @@ class PDFGenerator:
         buffer.close()
         
         return pdf
+    
+    def _strip_html_tags(self, text):
+        """Elimina etiquetas HTML del texto"""
+        import re
+        if not text:
+            return ""
+            
+        # Patrón para encontrar todas las etiquetas HTML
+        clean = re.compile('<.*?>')
+        # Reemplazar etiquetas con espacio
+        text = re.sub(clean, '', text)
+        
+        # Reemplazar entidades HTML comunes
+        text = text.replace('&nbsp;', ' ')
+        text = text.replace('&lt;', '<')
+        text = text.replace('&gt;', '>')
+        text = text.replace('&amp;', '&')
+        text = text.replace('&quot;', '"')
+        
+        return text

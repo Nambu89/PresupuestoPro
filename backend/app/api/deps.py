@@ -17,11 +17,10 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login
 def get_current_user(
     db: Session = Depends(get_db),
     token: str = Depends(oauth2_scheme),
-    request: Request = None
 ) -> User:
-    # Si no hay token en el header, intentar obtenerlo de los parámetros de la URL
-    if token is None and request:
-        token = request.query_params.get('token')
+    # Eliminar la parte que busca el token en los parámetros de URL
+    # if token is None and request:
+    #     token = request.query_params.get('token')
     
     if not token:
         raise HTTPException(
