@@ -95,7 +95,11 @@ class AIProjectEstimator:
             
             print(f"Enviando solicitud a la API de OpenAI: {self.api_url}")
             print(f"Modelo utilizado: {data['model']}")
-            print(f"Headers: {headers}")
+            # Ocultar la API Key en los logs
+            safe_headers = headers.copy()
+            if 'Authorization' in safe_headers:
+                safe_headers['Authorization'] = 'Bearer ****API_KEY_HIDDEN****'
+            print(f"Headers: {safe_headers}")
             
             response = requests.post(self.api_url, headers=headers, json=data)
             

@@ -53,8 +53,9 @@ def create_user_project(
         # Verificar que tenemos la clave de API configurada
         api_key = os.getenv("AI_API_KEY")
         api_url = os.getenv("AI_API_URL")
-        print(f"API Key configurada: {bool(api_key)}")
-        print(f"API URL configurada: {bool(api_url)}")
+        print("Verificación de configuración de API:")
+        print(f"  - API Key disponible: {bool(api_key)}")
+        print(f"  - API URL disponible: {bool(api_url)}")
         
         # Generar estimación con IA
         preview_data, full_data = ai_estimator.generate_estimate(project_text)
